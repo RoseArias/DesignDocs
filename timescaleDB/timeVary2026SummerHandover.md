@@ -1,16 +1,14 @@
 # Technical Handover Document
 
-# TimescaleDB Migration for Meter Reading Aggregation
+## TimescaleDB Migration for Meter Reading Aggregation
 
----
+### Executive Summary
 
-# Executive Summary
-
-This document provides a technical handover for the TimescaleDB migration completed as part of the meter reading aggregation optimization project.
+This document provides a technical handover for the TimescaleDB migration completed as part of the meter reading aggregation optimization project done in the summer of 2026 that built upon previous work.
 
 The objective of the project was to replace the existing PostgreSQL materialized-view-based reporting architecture with a TimescaleDB implementation using hypertables and continuous aggregates.
 
-The migration was driven by the increasing cost of refreshing PostgreSQL materialized views as historical meter data continued to grow. The previous implementation recalculated large portions of historical data during every refresh, resulting in long execution times and duplicated work across hourly and daily aggregations.
+The migration was driven by the increasing cost of refreshing PostgreSQL materialized views as historical meter data continued to grow. The previous implementation recalculated large portions of SHL: "Could this be: all" historical data during every refresh, resulting in long execution times and duplicated work across hourly and daily aggregations. SHL: Why does it duplicate work in the daily if coming from hourly? Does this relate to later comments about where it is getting the values?
 
 The new implementation introduces:
 
@@ -18,19 +16,19 @@ The new implementation introduces:
 - Continuous aggregates for incremental hourly and daily aggregation.
 - Cache tables that replace recursive views and runtime functions required for group aggregation.
 - Updated application initialization and refresh workflows.
+- Integrated in graphic reading functions and all places using the old materialized views so they could be commented out.
 - Benchmarking and validation tools to verify correctness against the legacy implementation.
 
-The migration successfully preserves analytical correctness while reducing aggregate refresh times by more than two orders of magnitude. Extensive benchmarking demonstrated approximately 250× faster hourly refreshes and approximately 340× faster daily refreshes compared to the previous implementation.
+The migration successfully preserves analytical correctness while reducing aggregate refresh times by more than two orders of magnitude, even when the amount of historical data is modest. Extensive benchmarking demonstrated approximately 250× faster hourly refreshes and approximately 340× faster daily refreshes compared to the previous implementation. SHL: Specify the amount of historical data if you can.
 
 The implementation is functionally complete and ready for continued development.
 
----
 
 # 1. Background
 
 ## Existing Architecture
 
-Prior to this project, reporting was performed entirely using PostgreSQL materialized views.
+Prior to this project, reporting was performed entirely using PostgreSQL materialized views. Below the readings were a regular table and the rest were materialized views. Note this is based on work done in the timeVary branch so the development branch did not have the group views, dealing with conversions in views and some other changes.
 
 ```
 readings
@@ -61,13 +59,13 @@ Although functionally correct, the design had several limitations.
 
 ### Expensive Refreshes
 
-Materialized views refreshed by recomputing large portions of historical data.
+Materialized views refreshed by recomputing large (SHL: all?) portions of historical data.
 
 As the database grew, refresh times increased proportionally.
 
 ### Duplicate Work
 
-Hourly and daily materialized views independently repeated much of the same aggregation logic.
+Before the previous time-varying work where this was originally addressedc, hourly and daily materialized views independently repeated much of the same aggregation logic.
 
 ### Runtime Conversion Overhead
 
@@ -76,8 +74,6 @@ Every refresh repeatedly joined against conversion tables and recalculated overl
 ### Group Aggregation Limitations
 
 Group aggregation depended on recursive views and runtime helper functions that are incompatible with TimescaleDB continuous aggregates.
-
----
 
 # 2. Project Objectives
 
@@ -99,7 +95,6 @@ Support significantly larger datasets without proportional increases in refresh 
 
 Move expensive calculations into predictable preprocessing and refresh stages rather than executing them repeatedly during aggregation.
 
----
 
 # 3. Final Architecture
 
@@ -121,6 +116,8 @@ meter_hourly_readings_unit_cagg   meter_daily_readings_unit_cagg
 group_hourly_readings_unit_cagg  group_daily_readings_unit_cagg
 ```
 
+SHL: First, this does not show properly on a narrow width screen. An image may be needed to fix that. Second, the old code created group daily from meter daily because it was faster. Was that tradeoff considered? The details of why are in the design document.
+
 The intended aggregation hierarchy is:
 
 1. Convert raw readings into hourly slices.
@@ -129,8 +126,6 @@ The intended aggregation hierarchy is:
 4. Aggregate meter values into group values.
 
 This layered design minimizes repeated calculations and enables TimescaleDB to perform incremental refreshes efficiently.
-
----
 
 # 4. Database Components
 
@@ -154,6 +149,8 @@ Each row contains:
 - conversion metadata
 - graphic unit information
 
+SHL: This split seems to include the sec_in_rate and unit_represents. OED allows certain changes to items (potentially including other items in this table) and I want to understand if the splits automatically respond or what needs to be done. In the bigger picture, can you explain why the values are needed in this case? Is it because the update depends on them?
+
 Previously this information was calculated every time aggregation occurred.
 
 The new implementation performs the calculation once during ingestion and stores the results for reuse.
@@ -164,8 +161,6 @@ The new implementation performs the calculation once during ingestion and stores
 - Eliminates repeated conversion joins.
 - Provides a stable source for continuous aggregates.
 - Improves refresh performance.
-
----
 
 ## 4.2 Meter Hourly Continuous Aggregate
 
@@ -197,7 +192,6 @@ Responsibilities include:
 
 Because the hourly split hypertable already contains precomputed overlap information, expensive calculations are not repeated.
 
----
 
 ## 4.3 Meter Daily Continuous Aggregate
 
@@ -225,9 +219,11 @@ While this maintains correctness, it does not yet realize the full benefits of h
 
 A future implementation should expose rollup state from the hourly aggregate (weighted sums, durations, minimums, and maximums) so that daily aggregates can be computed by summing intermediate states rather than reprocessing raw hourly slices.
 
+SHL: Sorry but I'm unclear on why you can't just properly combine the hourly values to get the daily value. Does this relate to a later comment on where the data is derived?
+
 Care must be taken not to average hourly averages, as this would produce incorrect weighted results.
 
----
+SHL: Can you elaborate on this?
 
 ## 4.4 Group Aggregation
 
@@ -274,7 +270,6 @@ Implemented components include:
 
 This removes runtime recursion while remaining compatible with TimescaleDB.
 
----
 
 # 5. Application Integration
 
@@ -307,13 +302,15 @@ Group queries now use:
 - group_hourly_readings_unit_cagg
 - group_daily_readings_unit_cagg
 
----
 
 # 6. Refresh Workflow
 
 The implemented refresh order is:
 
 1. Rebuild hypertable_hourly_split (when required).
+
+SHL: Does "when required" mean that some/all splits may not be updated because they are unchanged?
+
 2. Refresh hourly continuous aggregate.
 3. Refresh daily continuous aggregate.
 4. Refresh group dependency caches.
@@ -322,11 +319,10 @@ The implemented refresh order is:
 
 This dependency order must be preserved because each stage depends on results produced by previous stages.
 
----
 
 # 7. Testing and Validation
 
-A comprehensive validation suite was created to compare the TimescaleDB implementation against the legacy PostgreSQL implementation.
+A comprehensive validation suite was created to compare the TimescaleDB implementation against the last time-vary version that had already modified/added views and was moderately tested to verify it is correct.
 
 Comparison scripts were created for:
 
@@ -342,11 +338,7 @@ Validation confirmed:
 | Hourly | 157,896 | 157,896 | 0 |
 | Daily | 6,579 | 6,579 | 0 |
 
-Comparison tolerance:
-
-```
-1 × 10^-11
-```
+Comparison tolerance: 10e-11
 
 The following values were validated:
 
@@ -358,7 +350,7 @@ The following values were validated:
 
 No analytical differences were detected.
 
----
+SHL: Where is this test code located?
 
 # 8. Benchmark Results
 
@@ -378,7 +370,7 @@ TimescaleDB:
 
 Approximately **250× faster**.
 
----
+SHL: Without context of what was added and what was already in the DB for readings, it is difficult to know exactly what this represents. Is that possible, at least to give a reasonable idea? This applies to other values in the timing results.
 
 ## Daily Refresh
 
@@ -396,7 +388,6 @@ TimescaleDB:
 
 Approximately **340× faster**.
 
----
 
 # 9. Storage Considerations
 
@@ -411,13 +402,14 @@ The storage increase is primarily due to the hourly split hypertable.
 
 This is expected because each reading is decomposed into hourly slices before aggregation.
 
+SHL: I know we discuss this some but it might help to know some information about what is stored. I think you used the test data and that does have unusual values stored. Also, if the readings are multiple per minute, can you describe why the hourly is so much larger?
+
 The additional storage represents an intentional trade-off that enables:
 
 - dramatically faster refreshes
 - reduced runtime computation
 - improved scalability
 
----
 
 # 10. Files Added and Modified
 
@@ -434,6 +426,8 @@ The additional storage represents an intentional trade-off that enables:
 - CompareGroupHourlyReadings.sql
 - CompareGroupDailyReadings.sql
 
+SHL: I cannot find any of the files listed when I tried. Can you help me understand where they are?
+
 ## Application
 
 ```
@@ -447,7 +441,6 @@ Responsible for:
 - rebuild workflow
 - integration with database setup
 
----
 
 # 11. Known Limitations
 
@@ -463,7 +456,6 @@ No explicit chunk interval has been configured.
 
 Historical data compression has not yet been evaluated.
 
----
 
 # 12. Future Work and Optimization Opportunities
 
@@ -484,7 +476,6 @@ Future work should investigate:
 
 These approaches would significantly reduce ingestion overhead.
 
----
 
 ## 12.2 Avoid Full Hypertable Rebuilds
 
@@ -505,7 +496,7 @@ Full rebuilds should therefore be reserved for:
 
 Ordinary refreshes should instead use bounded refresh windows or TimescaleDB refresh policies.
 
----
+SHL: I thought you had said that allowing TSD to make this decision was relatively inexpensive because it can readily figure out what changed. I'm worried my understanding is off.
 
 ## 12.3 Build Daily Aggregates from Hourly Aggregates
 
@@ -520,7 +511,7 @@ A true hierarchical implementation would expose rollup state from the hourly agg
 
 Daily aggregation could then process significantly fewer rows while maintaining correctness.
 
----
+SHL: See another comment about how I don't yet understand why you cannot easily aggregate hours into days without weighting. Again, may relate to source.
 
 ## 12.4 Improve Time Predicate Efficiency
 
@@ -535,13 +526,11 @@ Some queries also call `time_bucket()` on values that are already bucketed.
 
 Removing this unnecessary computation should improve query performance.
 
----
-
 ## 12.5 Refresh Group Dependency Caches Only When Required
 
 Group cache tables are refreshed during every aggregate refresh.
 
-Normal reading imports do not modify:
+Normal reading imports do not modify: SHL: I think it is never actually.
 
 - group membership
 - conversion compatibility
@@ -561,8 +550,6 @@ Additional indexes such as:
 
 should also be benchmarked.
 
----
-
 ## 12.6 Optimize Conversion Lookups
 
 The ingestion trigger repeatedly searches the conversion table using overlapping time ranges.
@@ -577,8 +564,6 @@ Future benchmarking should evaluate:
 
 to improve ingestion performance.
 
----
-
 ## 12.7 Tune Chunk Size and Historical Storage
 
 The split hypertable currently uses TimescaleDB's default chunk interval.
@@ -590,8 +575,6 @@ Future work should determine an optimal chunk size based on:
 - workload characteristics
 
 Historical chunks may also benefit from TimescaleDB columnstore compression once frequent rebuilds are eliminated.
-
----
 
 ## 12.8 Additional Benchmarking
 
@@ -608,8 +591,6 @@ These include:
 - additional meters
 - production-scale workloads
 
----
-
 # 13. Lessons Learned
 
 ## Continuous Aggregates Require Careful Dependency Planning
@@ -621,8 +602,6 @@ Objects used by continuous aggregates cannot depend upon:
 - dynamic calculations
 
 Required metadata should be materialized before aggregation.
-
----
 
 ## Hierarchical Aggregation Improves Scalability
 
@@ -638,7 +617,7 @@ Daily
 
 is substantially more efficient than repeatedly aggregating directly from raw data.
 
----
+SHL: Is this different than how the materialized views that were started from did it?
 
 ## Correctness Must Be Verified
 
@@ -646,17 +625,19 @@ Performance improvements are only valuable if analytical correctness is preserve
 
 Every aggregate created during this project was validated against the legacy implementation before benchmarking.
 
----
-
 # 14. Acknowledgements
 
 Martin contributed the initial work integrating the group views and provided an important foundation for the final group aggregation implementation.
 
+SHL: Personal names are not normally used in the docs. The GitHub ID would be fine.
+
 Dr. Huss-Lederman provided valuable guidance throughout testing, validation, benchmarking, and verification of the implementation.
+
+SHL: This is not needed and, from my perspective, can go. You can leave it if you really want but only with my GitHub ID.
 
 Their support helped ensure both analytical correctness and significant performance improvements.
 
----
+SHL: I don't know if you need to give the details but would it be nice to mention that this does not include all the previous work on views & HT that lead to this work?
 
 # 15. Current Status
 
@@ -682,8 +663,6 @@ Future contributors should use this document as the primary technical reference 
 
 The following TimescaleDB documentation references provide additional background and guidance for future contributors working on optimization, maintenance, and further development of the aggregation architecture.
 
----
-
 ## Data Ingestion Optimization
 
 TimescaleDB recommends using multi-row inserts or bulk loading methods such as COPY instead of inserting rows individually. Batch ingestion reduces transaction overhead and improves write performance, particularly for high-volume time-series workloads.
@@ -695,8 +674,6 @@ https://www.tigerdata.com/docs/build/data-management/write-data/insert
 Caption:
 
 TimescaleDB documentation describing recommended approaches for efficient data ingestion, including multi-row INSERT operations and COPY-based loading.
-
----
 
 ## Continuous Aggregate Refresh Policies
 
@@ -712,8 +689,6 @@ Caption:
 
 TimescaleDB documentation explaining continuous aggregate refresh policies and recommended approaches for managing incremental materialization.
 
----
-
 ## Hypertable Query Performance and Chunk Pruning
 
 Efficient time filtering is important for TimescaleDB hypertables because queries should allow TimescaleDB to exclude unnecessary chunks.
@@ -727,8 +702,6 @@ https://www.tigerdata.com/docs/build/performance-optimization/secondary-indexes
 Caption:
 
 TimescaleDB documentation covering query performance optimization, indexing strategies, and efficient access patterns for hypertables.
-
----
 
 ## Hierarchical Continuous Aggregates
 
@@ -744,8 +717,6 @@ Caption:
 
 TimescaleDB documentation describing hierarchical continuous aggregates and techniques for building multi-level aggregation pipelines.
 
----
-
 ## Continuous Aggregate Limitations with Joined Tables
 
 Group aggregation relies on cached dependency tables because continuous aggregates have limitations when tracking changes in joined tables.
@@ -760,8 +731,6 @@ Caption:
 
 TimescaleDB documentation explaining continuous aggregate behaviour, limitations, and considerations when using joins.
 
----
-
 ## Hypertable Chunk Sizing
 
 The current implementation relies on TimescaleDB default chunk sizing.
@@ -775,8 +744,6 @@ https://www.tigerdata.com/docs/learn/hypertables/understand-hypertables
 Caption:
 
 TimescaleDB documentation explaining hypertables, chunk sizing, and storage management considerations.
-
----
 
 ## Continuous Aggregate Indexing
 
@@ -797,8 +764,6 @@ Caption:
 
 TimescaleDB documentation describing indexing strategies for continuous aggregates.
 
----
-
 ## Real-Time Aggregates
 
 All continuous aggregates currently use real-time aggregation behaviour.
@@ -812,8 +777,6 @@ https://www.tigerdata.com/docs/learn/continuous-aggregates/real-time-aggregates
 Caption:
 
 TimescaleDB documentation explaining real-time continuous aggregates and the relationship between materialized data and recent raw data.
-
----
 
 ## Summary
 

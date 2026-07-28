@@ -115,5 +115,3 @@ select id,name from meters;
  - Also, when generating the test data, make sure you are using the proper step. If generated test data is using "day" `` stepTime ``, use the first `` daily `` query above. If using "hour" `` stepTime ``, use the second `` hourly `` query above.
 
 6. After running the last query, you now have begun testing the query. Simply hold `` Space `` to see all of the test data that was inserted, if you don't want to see the test data, simply press `` Q `` and it should quit the query and display the time it took to run the query. Make sure to run the same `` select_line_readings `` 2-3 times to ensure caching. The completion times will vary from the first time your run the query compared to the second or third time.
-
----

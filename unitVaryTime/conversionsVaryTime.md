@@ -794,8 +794,6 @@ CREATE INDEX idx_meter_hourly_ordering
 ON meter_hourly_readings_unit (meter_id, graphic_unit_id, lower(time_interval));
 ```
 
----
-
 ### A New Approach
 
 During testing of the `meter_hourly_readings_unit_old` view, we discovered that its implementation of time-varying conversions only functioned correctly when each reading aligned perfectly with the duration of the applied conversions. For example, a 1-hour reading could be split by four 15-minute conversions, but the system failed when those conversions were of unequal lengths (e.g., two 15-minute conversions and one 30-minute conversion). This approach also failed when conversions partially overlapped readings or varied in duration.
@@ -807,8 +805,6 @@ However, further testing revealed limitations even in this improved approach. Sp
 - **Lack of Extremes:** It was not possible to derive accurate `min` and `max` rates without referencing the underlying raw data.
 
 These findings highlighted the trade-offs between performance and precision and motivated continued refinement of the conversion pipeline.
-
----
 
 ### A Final Attempt
 
