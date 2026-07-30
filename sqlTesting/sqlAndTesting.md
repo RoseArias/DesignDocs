@@ -27,7 +27,7 @@ delete from cik_vary;
 delete from units;
 ```
 
-- Purge suffix units. Works after time-varying work.
+- Purge suffix units. Works after time-varying work. This was used during some testing where they seemed to be causing issues.
 
 ```sql
 DELETE FROM CONVERSION_SEGMENTS WHERE DESTINATION_ID IN ( SELECT ID FROM UNITS WHERE SUFFIX != '' OR TYPE_OF_UNIT = 'suffix' );
@@ -40,25 +40,11 @@ DELETE FROM METERS WHERE DEFAULT_GRAPHIC_UNIT IN ( SELECT ID FROM UNITS WHERE SU
 DELETE FROM UNITS WHERE SUFFIX != '' OR TYPE_OF_UNIT = 'suffix';
 ```
 
-- Remove the readings, meters/groups, units & ciks associated with the Water Gallon/gallon test data.
-
-```sql
-DELETE FROM READINGS WHERE METER_ID NOT IN ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon');
-delete from groups_immediate_meters;
-delete from groups_immediate_children;
-delete from groups;
-DELETE FROM METERS WHERE ID NOT IN ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon');
-DELETE FROM CIK WHERE SOURCE_ID NOT IN ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) OR DESTINATION_ID NOT IN ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
-DELETE FROM CIK_VARY WHERE SOURCE_ID NOT IN ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) OR DESTINATION_ID NOT IN ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
-DELETE FROM UNITS WHERE ID NOT IN ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) AND ID NOT IN ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
-```
-
-- Remove all units, conversions, ... but the water ones. Probably easier to delete them all and just recreate ones wanted.
+- Remove all units, conversions, ... but the Water Gallon/gallon test data. This was done to allow the system to only have one meter and set of conversions to limit the items being worked on. Probably easier to delete them all and just recreate ones wanted.
 
 ```sql
 DELETE FROM CONVERSION_SEGMENTS WHERE SOURCE_ID NOT IN ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) OR DESTINATION_ID NOT IN ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
 DELETE FROM CONVERSIONS WHERE SOURCE_ID NOT IN ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) OR DESTINATION_ID NOT IN ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
--- I made a mistake and did METER_UNIT for ID select so had to remove all readings since ones wanted were gone.
 DELETE FROM READINGS WHERE METER_ID NOT IN ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon');
 delete from groups_immediate_meters;
 delete from groups_immediate_children;
@@ -69,7 +55,7 @@ DELETE FROM CIK_VARY WHERE SOURCE_ID NOT IN ( SELECT UNIT_ID FROM METERS WHERE N
 DELETE FROM UNITS WHERE ID NOT IN ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) AND ID NOT IN ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
 ```
 
-- Make water (see previous example) have 2 segments (no pattern) where removal all other ones if they exist:
+- Make water (see previous example) have 2 segments (no pattern) where remove all other ones if they exist:
 
 ```sql
 DELETE FROM CIK;
@@ -81,10 +67,215 @@ INSERT INTO CONVERSION_SEGMENTS VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME
 
 ## Time varying
 
-- Change the end time of the one segment of the test data for Water Gallon/gallon.
+- Change the end time of the one segment of the test data for Water Gallon/gallon. Assumes such a conversion segment exists.
 
 ```sql
 UPDATE CONVERSION_SEGMENTS SET END_TIME = '2021-06-06 00:00:00' WHERE SOURCE_ID IN ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) AND DESTINATION_ID IN ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ) AND START_TIME = '-infinity' AND END_TIME = 'infinity';
+```
+
+- This uses the standard test data to change Water_Gallon meter to have 3 conversion segments to the gallon graphing unit. The dates are specific to the 5 days used in the test data. This was for an easy test of time-varying code. One can probe the few points in the DB, manually make the DB graphic function call or graph it to see the result.
+
+**Note that as of 260730, when OED is restarted it resets cik/cik_vary based on the actual conversions so you have to reinsert those values if needed. ??Try inserting conversions/conversion_segments to see if that fixes??**
+
+The readings are:
+
+- quantity
+  - 24: 2021-06-01 00:00:00 to 2021-06-02 00:00:00
+  - 21: 2021-06-02 00:00:00 to 2021-06-02 12:00:00
+  - 27: 2021-06-02 12:00:00 to 2021-06-03 00:00:00
+  - 72: 2021-06-03 00:00:00 to 2021-06-04 00:00:00
+  - 96: 2021-06-04 00:00:00 to 2021-06-05 00:00:00
+  - 120: 2021-06-05 00:00:00 to 2021-06-06 00:00:00
+- flow: important to note that it is per minute not
+  - 1: 2021-06-01 00:00:00 to 2021-06-02 00:00:00
+  - 2: 2021-06-02 00:00:00 to 2021-06-03 00:00:00
+  - 2.6875: 2021-06-03 00:00:00 to 2021-06-03 09:00:00
+  - 3.125: 2021-06-03 09:00:00 to 2021-06-03 21:00:00
+  - 3.4375: 2021-06-03 21:00:00 to 2021-06-04 00:00:00
+  - 4: 2021-06-04 00:00:00 to 2021-06-05 00:00:00
+  - 5: 2021-06-05 00:00:00 to 2021-06-06 00:00:00
+
+The expected values for line are:
+
+- quantity
+  - hourly
+    - June 1
+      - 3 (24 reading for day x 3 / 24 hour for reading = 3 reading/hour)
+    - June 2
+      - 5.25 (21 x (4 / 12) / 4 x 3) to 04:00
+        - Explanation: 21 is reading value, 4 / 12 is the prorated amount of this reading that applies to the 6 hours of this conversion, divide by 4 to get the rate and multiply by 3 for the conversion.
+      - 8.75 (21 x (8 / 12) / 8 x 5) to 12:00
+        - ???The code appears to use the reading times and does not include the conversion segments that split up the reading so only see difference at reading blocks. The value seems to be the average of the two segments.???
+      - 11.25 (27 x (12 / 12) / 12 x 5) after
+    - June 3
+      - 15 (72 x (18 / 24) / 18 x 5) to 18:00
+      - 21 (72 x (6 / 24) / 6 x 7) after
+      - ???See previous point.???
+    - June 4
+      - 28 (96 / 24 * 7)
+    - June 5
+      - 45 (120 / 24 * 9)
+  - daily
+    - June 1
+      - 3 (1 reading for day (quantity/min) x 3 = 3 reading/hour)
+    - June 2
+      - 9.41666667 ((5.25 x 4 + 8.75 x 8 + 11.25 x 12) / 24)
+        - Explanation: It is the sum of the quantities for each segment divided by 24 hours for the day. The hourly items above are a rate so multiply by the time for the segment to get the quantity. This is the same as not doing the division for conversion time above.
+        - ???The code appears to average the rates without proper weighting for the reading; min/max okay.????
+    - June 3
+      - 16.5 ((15 x 18 + 21 x 6) / 24)
+      - ???see previous point???
+    - June 4
+      - 28
+    - June 5
+      - 45
+  - raw
+    - 2021-06-01 00:00:00 to 2021-06-02 00:00:00
+      - 3 (24 / 24 x 3)
+    - 2021-06-02 00:00:00 to 2021-06-02 12:00:00
+      - 7.58333333 ((21 x (4 / 12) x 3 + 21 (8 / 12) x 5) / 12)
+    - 2021-06-02 12:00:00 to 2021-06-03 00:00:00
+      - 11.25 ((27 / 12) x 5)
+    - 2021-06-03 00:00:00 to 2021-06-04 00:00:00
+      - 16.5 ((72 x (18 / 24) x 5 + 72 (6 / 24) x 7) / 24)
+    - 96: 2021-06-04 00:00:00 to 2021-06-05 00:00:00
+      - 28 (96 / 24 x 7)
+    - 120: 2021-06-05 00:00:00 to 2021-06-06 00:00:00
+      - 45 (120 / 24 x 9)
+- flow
+  - hourly
+    - June 1
+      - 180 ((1 (quantity/min for reading) x 3) x 60 min/hour = 180 quantity/hour)
+    - June 2
+      - 360 (2 x 3 x 60) to 04:00
+        - Explanation: 2 is reading value, multiply by 3 for the conversion & 60 to go from per min of reading to per hour.
+      - 600 (2 x 5 x 60) after
+    - June 3
+      - 806.25 (2.6875 x 5 x 60) to 09:00
+      - 937.5 (3.125 x 5 x 60) to 18:00
+        - ???This is the min not the readings. It is actually the average of this value and the next for the reading.???
+      - 1,312.5 (3.125 x 7 x 60) to 21:00
+        - ???See previous point but now max.???
+      - 1,443.75 (3.4375 x 7 x 60) after
+    - June 4
+      - 1,680 (4 x 7 x 60)
+    - June 5
+      - 2700 (5 x 9 x 60)
+  - daily
+    - June 1
+      - 180 (1 x 3 x 60)
+    - June 2
+      - 560 ((360 x 4 + 600 x 20) / 24)
+        - Explanation: It is the sum of the quantities for each segment divided by 24 hours for the day. The hourly items above are a rate so multiply by the time for the segment to get the quantity. This is the same as not doing the division for conversion time above.
+        - ???The code appears to average the rates without proper weighting for the reading; min/max okay; note raw gets it right????
+    - June 3
+      - 998.4375 ((806.25 x 9 + 937.5 x 9 + 1,312.5 x 3 + 1,443.75 x 3) / 24)
+      - ???see previous point but the average of the 4 values. It is very close (1,173.046875 on my average vs 1071.875) but not identical.???
+    - June 4
+      - 1680
+    - June 5
+      - 2700
+??fix up raw not quantity for rest??
+  - raw
+    - 2021-06-01 00:00:00 to 2021-06-02 00:00:00
+      - 180 (1 x 3 x 60)
+    - 2021-06-02 00:00:00 to 2021-06-03 00:00:00
+      - 560 ((360 x 4 + 600 x 20) / 24)
+    - 2021-06-03 00:00:00 to 2021-06-03 09:00:00
+      - 806.25 (2.6875 x 5 x 60)
+    - 2021-06-03 09:00:00 to 2021-06-03 18:00:00
+      - 937.5 (3.125 x 5 x 60)
+      - ???Code missing the cut at the conversion end so not present.???
+    - 2021-06-03 18:00:00 to 2021-06-03 21:00:00
+      - 1,312.5 (3.125 x 7 x 60)
+      - ???Code has different value.???
+    - 2021-06-03 21:00:00 to 2021-06-04 00:00:00
+      - 1,443.75 (3.4375 x 7 x 60)
+    - 96: 2021-06-04 00:00:00 to 2021-06-05 00:00:00
+      - 1680
+    - 120: 2021-06-05 00:00:00 to 2021-06-06 00:00:00
+      - 2700
+
+The expected values for 1 day bars are:??update for new values and do flow for all.????????
+
+- quantity
+  - June 1: 3 x 24 = 72
+  - June 2: 8.25 x 24 = 198
+  - June 3: 15 x 24 = 360
+  - June 4: 20 x 24 = 480
+  - June 5: 35 x 24 = 840
+
+At least as of 260728, one needs to manually update the views (hypertables in TSD) after directly adding entries in cik/cik_vary. This is done by: ``npm run rebuildAllReadingViews``.
+
+Since this is only for 5 days, graphing on the web page will show raw data. If you want to see daily, you can set the meter frequency reading below 5 min (5 days * 24 hours/day * 60 min/hour / 1440 max readings = 5 min/reading) such as 00:04:00. ??Unsure why get hourly here since too many points expected (60 min/hour / 4 min/readings * 24 hour/day * 5 day = 1800 readings)????
+
+To test map, create the Happy Place map per the directions on the developer docs for test data. Set the gps of this meter to 20,20. On the map set it to the desired number of days (<=5). Expect results (it is per day):
+
+- quantity??fix up??
+  - 1 day (June 5): 840
+  - 2 day (June 4-5): (480 + 840) / 2 = 660
+  - 3 day  (June 3-5): (360 + 480 + 840) / 3 = 560
+  - 4 day  (June 2-5): (198 + 360 + 480 + 840) / 4 = 469.5
+  - 5 day  (June 1-5): (72 + 198 + 360 + 480 + 840) / 5 = 390
+
+To teat 3D, you need to set the date range on the graphic to 2021-06-01 to 2021-06-06. The values should follow the line hourly.
+
+```sql
+-- Quantity
+-- Remove current values.
+DELETE FROM CIK WHERE SOURCE_ID = ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) and DESTINATION_ID = ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
+DELETE FROM CIK_VARY WHERE SOURCE_ID = ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) and DESTINATION_ID = ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
+-- Insert the desired conversion segments directly in cik, cik_vary
+INSERT INTO cik VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ) );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ), '-infinity', '2021-06-02 04:00:00', 3, 0 );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ), '2021-06-02 04:00:00', '2021-06-03 18:00:00', 5, 0 );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ), '2021-06-03 18:00:00', '2021-06-05 00:00:00', 7, 0 );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ), '2021-06-05 00:00:00', 'infinity', 9, 0 );
+-- flow: same as quantity but different meter/graphic unit
+-- Remove current values.
+DELETE FROM CIK WHERE SOURCE_ID = ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ) and DESTINATION_ID = ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' );
+DELETE FROM CIK_VARY WHERE SOURCE_ID = ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ) and DESTINATION_ID = ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' );
+-- Insert the 3 desired conversion segments directly in cik, cik_vary
+INSERT INTO cik VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' ) );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' ), '-infinity', '2021-06-02 04:00:00', 3, 0 );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' ), '2021-06-02 04:00:00', '2021-06-03 18:00:00', 5, 0 );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' ), '2021-06-03 18:00:00', '2021-06-05 00:00:00', 7, 0 );
+INSERT INTO cik_vary VALUES ( ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ), ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' ), '2021-06-05 00:00:00', 'infinity', 9, 0 );
+
+-- View readings, cik_vary, hourly cagg and daily cagg. It is for a specific meter in that test system. or cagg, daily and group are similar. Last is to directly call the DB function to return the meter line graphic points. By changing the point_accuracy one can get the raw, hourly or daily level result.
+-- quantity
+SELECT * FROM readings where meter_id = ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon' );
+select * FROM CIK_VARY WHERE SOURCE_ID = ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon' ) and DESTINATION_ID = ( SELECT ID FROM UNITS WHERE NAME = 'gallon' );
+SELECT * FROM meter_hourly_readings_unit_cagg where meter_id = ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon' ) and graphic_unit_id = ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ) order by bucket;
+SELECT * FROM meter_daily_readings_unit_cagg where meter_id = ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon' ) and graphic_unit_id = ( SELECT ID FROM UNITS WHERE NAME = 'gallon' ) order by bucket;
+SELECT * FROM meter_line_readings_unit (
+    -- If you want by a meter_id value use {#}
+    meter_ids => '{11}',
+    passed_graphic_unit_id => 7,
+    -- ???why don't these work????
+    -- meter_ids => 'SELECT array_agg(ID) FROM METERS WHERE NAME = ''Water Gallon'';',
+    -- passed_graphic_unit_id => 'SELECT ID FROM UNITS WHERE NAME = ''gallon''',
+    start_stamp => '2021-06-01 00:00:00'::timestamp,
+    end_stamp => '2021-06-06 00:00:00'::timestamp,
+    point_accuracy => 'daily',
+    max_raw_points =>  1440,
+    max_hour_points =>  1440
+);
+-- flow
+SELECT * FROM readings where meter_id = ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' );
+select * FROM CIK_VARY WHERE SOURCE_ID = ( SELECT UNIT_ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ) and DESTINATION_ID = ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' );
+SELECT * FROM meter_hourly_readings_unit_cagg where meter_id = ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ) and graphic_unit_id = ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' ) order by bucket;
+SELECT * FROM meter_daily_readings_unit_cagg where meter_id = ( SELECT ID FROM METERS WHERE NAME = 'Water Gallon flow 1-5 per minute' ) and graphic_unit_id = ( SELECT ID FROM UNITS WHERE NAME = 'gallon per minute' ) order by bucket;
+SELECT * FROM meter_line_readings_unit (
+    -- If you want by a meter_id value use {#}
+    meter_ids => '{17}',
+    passed_graphic_unit_id => 24,
+    start_stamp => '2021-06-01 00:00:00'::timestamp,
+    end_stamp => '2021-06-06 00:00:00'::timestamp,
+    point_accuracy => 'raw',
+    max_raw_points =>  1440,
+    max_hour_points =>  1440
+);
 ```
 
 - This is a reasonable test case with patterns (weeks) and slope/intercept that overlap. Here is a description:
@@ -294,7 +485,7 @@ These have "a" at the front of names so they show up early in the OED menus.
 
 **If you update cik_vary (and maybe cik) then the values inserted will be lost and you will not see what is desired.**
 
-Note that flow are the same where you simpley replace quantity -> flow everywhere.
+Note that flow are the same where you simply replace quantity -> flow everywhere.
 
 ### Units
 
@@ -465,13 +656,17 @@ ALTER TABLE readings DISABLE TRIGGER trg_readings_update_hourly_hypertable;
 ALTER TABLE readings ENABLE TRIGGER trg_readings_update_hourly_hypertable;
 ```
 
+#### Force an update of a TSD split table. This might not work any more
+
+SELECT rebuild_hourly_hypertable_split();
+
 ## Standard developer test data with time-varying
 
 If you insert the standard test data and don't have other items in the DB that you manually added then you should get this when you look at cik_vary (``select (select name from units where id = source_id), (select name from units where id = destination_id), * from cik_vary order by source_id, destination_id;
 ``):
 
 | source | destination | source_id | destination_id | start_time | end_time | slope | intercept |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | 
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | Electric_Utility | BTU | 211 | 206 | -infinity | infinity | 3412.142 | 0 |
 | Electric_Utility | m³ gas | 211 | 207 | -infinity | infinity | 0.09315147659999999 | 0 |
 | Electric_Utility | kWh | 211 | 209 | -infinity | infinity | 1 | 0 |
