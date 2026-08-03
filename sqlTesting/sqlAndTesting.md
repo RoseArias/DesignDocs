@@ -95,7 +95,11 @@ The readings are:
   - 4: 2021-06-04 00:00:00 to 2021-06-05 00:00:00
   - 5: 2021-06-05 00:00:00 to 2021-06-06 00:00:00
 
+At least as of 260728, one needs to manually update the views (hypertables in TSD) after directly adding entries in cik/cik_vary. This is done by: ``npm run rebuildAllReadingViews``.
+
 The expected values for line are:
+
+Since this is only for 5 days, graphing on the web page will show raw data. If you want to see daily, you can set the meter frequency reading below 5 min (5 days x 24 hours/day* 60 min/hour / 1440 max readings = 5 min/reading) such as 00:04:00. ??Unsure why get hourly here since too many points expected (60 min/hour / 4 min/readings *24 hour/day* 5 day = 1800 readings)???? It is also fine to use the direct DB queries to see the value for these graphing functions.
 
 - quantity
   - hourly
@@ -105,12 +109,10 @@ The expected values for line are:
       - 5.25 (21 x (4 / 12) / 4 x 3) to 04:00
         - Explanation: 21 is reading value, 4 / 12 is the prorated amount of this reading that applies to the 6 hours of this conversion, divide by 4 to get the rate and multiply by 3 for the conversion.
       - 8.75 (21 x (8 / 12) / 8 x 5) to 12:00
-        - ???The code appears to use the reading times and does not include the conversion segments that split up the reading so only see difference at reading blocks. The value seems to be the average of the two segments.???
       - 11.25 (27 x (12 / 12) / 12 x 5) after
     - June 3
       - 15 (72 x (18 / 24) / 18 x 5) to 18:00
       - 21 (72 x (6 / 24) / 6 x 7) after
-      - ???See previous point.???
     - June 4
       - 28 (96 / 24 * 7)
     - June 5
@@ -119,12 +121,10 @@ The expected values for line are:
     - June 1
       - 3 (1 reading for day (quantity/min) x 3 = 3 reading/hour)
     - June 2
-      - 9.41666667 ((5.25 x 4 + 8.75 x 8 + 11.25 x 12) / 24)
+      - 9.41666667 ((5.25 x 4 + 8.75 x 8 + 11.25 x 12) / 24) with min of 5.25 and max of 11.25
         - Explanation: It is the sum of the quantities for each segment divided by 24 hours for the day. The hourly items above are a rate so multiply by the time for the segment to get the quantity. This is the same as not doing the division for conversion time above.
-        - ???The code appears to average the rates without proper weighting for the reading; min/max okay.????
     - June 3
-      - 16.5 ((15 x 18 + 21 x 6) / 24)
-      - ???see previous point???
+      - 16.5 ((15 x 18 + 21 x 6) / 24) with min of 15 and max of 21
     - June 4
       - 28
     - June 5
@@ -134,6 +134,7 @@ The expected values for line are:
       - 3 (24 / 24 x 3)
     - 2021-06-02 00:00:00 to 2021-06-02 12:00:00
       - 7.58333333 ((21 x (4 / 12) x 3 + 21 (8 / 12) x 5) / 12)
+      - ???This and other ones are splitting at the conversion and not honoring the original reading time.
     - 2021-06-02 12:00:00 to 2021-06-03 00:00:00
       - 11.25 ((27 / 12) x 5)
     - 2021-06-03 00:00:00 to 2021-06-04 00:00:00
@@ -153,9 +154,7 @@ The expected values for line are:
     - June 3
       - 806.25 (2.6875 x 5 x 60) to 09:00
       - 937.5 (3.125 x 5 x 60) to 18:00
-        - ???This is the min not the readings. It is actually the average of this value and the next for the reading.???
       - 1,312.5 (3.125 x 7 x 60) to 21:00
-        - ???See previous point but now max.???
       - 1,443.75 (3.4375 x 7 x 60) after
     - June 4
       - 1,680 (4 x 7 x 60)
@@ -165,60 +164,71 @@ The expected values for line are:
     - June 1
       - 180 (1 x 3 x 60)
     - June 2
-      - 560 ((360 x 4 + 600 x 20) / 24)
+      - 560 ((360 x 4 + 600 x 20) / 24) with min of 360 and max of 600
         - Explanation: It is the sum of the quantities for each segment divided by 24 hours for the day. The hourly items above are a rate so multiply by the time for the segment to get the quantity. This is the same as not doing the division for conversion time above.
-        - ???The code appears to average the rates without proper weighting for the reading; min/max okay; note raw gets it right????
     - June 3
-      - 998.4375 ((806.25 x 9 + 937.5 x 9 + 1,312.5 x 3 + 1,443.75 x 3) / 24)
-      - ???see previous point but the average of the 4 values. It is very close (1,173.046875 on my average vs 1071.875) but not identical.???
+      - 998.4375 ((806.25 x 9 + 937.5 x 9 + 1,312.5 x 3 + 1,443.75 x 3) / 24) with min of 806.25 and max of 1443.75
     - June 4
       - 1680
     - June 5
       - 2700
-??fix up raw not quantity for rest??
   - raw
     - 2021-06-01 00:00:00 to 2021-06-02 00:00:00
       - 180 (1 x 3 x 60)
+      - Explanation: Same as hourly/daily since flow and those points spans the full reading.
     - 2021-06-02 00:00:00 to 2021-06-03 00:00:00
       - 560 ((360 x 4 + 600 x 20) / 24)
+      - Explanation: Ave of flows for day weighted by hours that it applies.
+      - ???This and other ones are splitting at the conversion and not honoring the original reading time.
     - 2021-06-03 00:00:00 to 2021-06-03 09:00:00
-      - 806.25 (2.6875 x 5 x 60)
-    - 2021-06-03 09:00:00 to 2021-06-03 18:00:00
-      - 937.5 (3.125 x 5 x 60)
-      - ???Code missing the cut at the conversion end so not present.???
-    - 2021-06-03 18:00:00 to 2021-06-03 21:00:00
-      - 1,312.5 (3.125 x 7 x 60)
-      - ???Code has different value.???
-    - 2021-06-03 21:00:00 to 2021-06-04 00:00:00
-      - 1,443.75 (3.4375 x 7 x 60)
+      - 806.25
+      - Explanation: Same as hourly over same time range since flow and those points spans the full reading.
+    - 2021-06-03 09:00:00 to 2021-06-03 21:00:00
+      - 1,031.25 ((937.5 x 9 + 1,312.5 x 3) / 12)
+      - ???This and other ones are splitting at the conversion and not honoring the original reading time.
+    - 2021-06-03 21:00:00 to 2021-06-04 04:00:00
+      - 1,578.75 ((1,443.75 x 3 + 1680 x 4) / 7)
+      - ???This and other ones are splitting at the conversion and not honoring the original reading time. IMpacts next point too,
     - 96: 2021-06-04 00:00:00 to 2021-06-05 00:00:00
       - 1680
     - 120: 2021-06-05 00:00:00 to 2021-06-06 00:00:00
       - 2700
 
-The expected values for 1 day bars are:??update for new values and do flow for all.????????
+The expected values for 1 day bars are (tested by looking at graphic). All values are the average rate/day (from daily) for the day x 24 hours/day.
 
 - quantity
   - June 1: 3 x 24 = 72
-  - June 2: 8.25 x 24 = 198
-  - June 3: 15 x 24 = 360
-  - June 4: 20 x 24 = 480
-  - June 5: 35 x 24 = 840
-
-At least as of 260728, one needs to manually update the views (hypertables in TSD) after directly adding entries in cik/cik_vary. This is done by: ``npm run rebuildAllReadingViews``.
-
-Since this is only for 5 days, graphing on the web page will show raw data. If you want to see daily, you can set the meter frequency reading below 5 min (5 days * 24 hours/day * 60 min/hour / 1440 max readings = 5 min/reading) such as 00:04:00. ??Unsure why get hourly here since too many points expected (60 min/hour / 4 min/readings * 24 hour/day * 5 day = 1800 readings)????
+  - June 2: 9.41666667 x 24 = 226
+  - June 3: 16.5 x 24 = 396
+  - June 4: 28 x 24 = 672
+  - June 5: 45 x 24 = 1,080
+- flow
+  - June 1: 180 x 24 = 4,320
+  - June 2: 560 x 24 = 13,440
+  - June 3: 998.4375 x 24 = 23,962.5
+  - June 4: 1680 x 24 = 40,320
+  - June 5: 2700 x 24 = 64,800
 
 To test map, create the Happy Place map per the directions on the developer docs for test data. Set the gps of this meter to 20,20. On the map set it to the desired number of days (<=5). Expect results (it is per day):
 
-- quantity??fix up??
-  - 1 day (June 5): 840
-  - 2 day (June 4-5): (480 + 840) / 2 = 660
-  - 3 day  (June 3-5): (360 + 480 + 840) / 3 = 560
-  - 4 day  (June 2-5): (198 + 360 + 480 + 840) / 4 = 469.5
-  - 5 day  (June 1-5): (72 + 198 + 360 + 480 + 840) / 5 = 390
+- quantity
+  - 1 day (June 5): 1080
+    - Explanation: Same as 6/5 bar
+  - 2 day (June 4-5): (1080 + 672) / 2 = 876
+    - Explanation: Sum of 6/4 & 6/5 bar divided by 2 days
+  - 3 day  (June 3-5): (1080 + 672 + 396) / 3 = 716
+  - 4 day  (June 2-5): (1080 + 672 + 396 + 226) / 4 = 593.5
+  - 5 day  (June 1-5): (1080 + 672 + 396 + 226 + 72) / 5 = 489.2
+- flow
+  - 1 day (June 5): 64,800
+    - Explanation: Same as 6/5 bar
+  - 2 day (June 4-5): (64,800 + 40,320) / 2 = 52,560
+    - Explanation: Sum of 6/4 & 6/5 bar divided by 2 days
+  - 3 day  (June 3-5): (64,800 + 40,320 + 23,962.5) / 3 = 43,027.5
+  - 4 day  (June 2-5): (64,800 + 40,320 + 23,962.5 + 13,440) / 4 = 35,630.625
+  - 5 day  (June 1-5): (64,800 + 40,320 + 23,962.5 + 13,440 + 4,320) / 5 = 29,368.5
 
-To teat 3D, you need to set the date range on the graphic to 2021-06-01 to 2021-06-06. The values should follow the line hourly.
+To teat 3D, you need to set the date range on the graphic to 2021-06-01 to 2021-06-06. The values should follow the line hourly. Make sure the meter reading freq. is less than 1 hour so it will allow it to graph.
 
 ```sql
 -- Quantity
@@ -251,7 +261,7 @@ SELECT * FROM meter_daily_readings_unit_cagg where meter_id = ( SELECT ID FROM M
 SELECT * FROM meter_line_readings_unit (
     -- If you want by a meter_id value use {#}
     meter_ids => '{11}',
-    passed_graphic_unit_id => 7,
+    passed_graphic_unit_id => 9,
     -- ???why don't these work????
     -- meter_ids => 'SELECT array_agg(ID) FROM METERS WHERE NAME = ''Water Gallon'';',
     -- passed_graphic_unit_id => 'SELECT ID FROM UNITS WHERE NAME = ''gallon''',
