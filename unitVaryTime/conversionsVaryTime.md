@@ -470,7 +470,7 @@ Steve's review also identified several administration-page improvements. The Bas
 The current holiday administration PR documents a more complete list of known limitations and smaller cleanup items. The team turnover document contains implementation details and suggested starting points for future work.
 
 - Holiday administration PR: TBD
-- [Team turnover doc](./summer2026HolidayTurnover.odt)
+- [Team turnover doc](./summer2026HolidayTurnover.md)
 - RRule follow-up: [OED issue #1681](https://github.com/OpenEnergyDashboard/OED/issues/1681)
 
 #### Applying holiday exceptions to RRule
